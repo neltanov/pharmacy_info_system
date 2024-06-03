@@ -1,0 +1,128 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/jackc/pgx/v4/pgxpool"
+	_ "github.com/jackc/pgx/v4/stdlib"
+)
+
+var db *pgxpool.Pool
+
+func main() {
+	var err error
+
+	password := "dFw57%&f10H"
+	escapedPassword := url.QueryEscape(password)
+	dsn := fmt.Sprintf("postgres://b_neltanov:%s@94.139.247.116:5432/dbstud", escapedPassword)
+	db, err = pgxpool.Connect(context.Background(), dsn)
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v\n", err)
+	}
+	defer db.Close()
+
+	var result string
+	err = db.QueryRow(context.Background(), "SELECT 'Connection successful'").Scan(&result)
+	if err != nil {
+		log.Fatalf("Error querying database: %v\n", err)
+	}
+
+	log.Printf("Test connection result: %s\n", result)
+
+	router := mux.NewRouter()
+
+	router.HandleFunc("/", HomeHandler)
+	router.HandleFunc("/customers/missed_orders", getMissedOrders).Methods("GET")
+	router.HandleFunc("/orders", createOrder).Methods("POST")
+
+	log.Println("Server is running on port 8000")
+	log.Fatal(http.ListenAndServe(":8000", router))
+}
+
+func HomeHandler(w http.ResponseWriter, r *http.Request) {
+	_, err := fmt.Fprintf(w, "Hello World")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func getMissedOrders(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(context.Background(), `
+        SELECT customer.*, orders.*
+FROM customer
+         JOIN orders ON customer.id = orders.customer_id
+WHERE orders.status = 'done'
+  AND orders.production_date < CURRENT_DATE;
+
+SELECT COUNT(DISTINCT customer.id)
+FROM customer
+         JOIN orders ON customer.id = orders.customer_id
+WHERE orders.status = 'done'
+  AND orders.production_date < CURRENT_DATE;
+    `)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	customers := []Customer{}
+	for rows.Next() {
+		var customer Customer
+		if err := rows.Scan(&customer.ID, &customer.Surname, &customer.Name, &customer.MiddleName, &customer.PhoneNumber, &customer.Address); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		customers = append(customers, customer)
+	}
+
+	if err := json.NewEncoder(w).Encode(customers); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func createOrder(w http.ResponseWriter, r *http.Request) {
+	var order Order
+	if err := json.NewDecoder(r.Body).Decode(&order); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	query := `
+        INSERT INTO "orders" (customer_id, receipt_id, order_date, production_date, status)
+        VALUES ($1, $2, $3, $4, $5)
+    `
+	_, err := db.Exec(context.Background(), query, order.CustomerID, order.ReceiptID, order.OrderDate, order.ProductionDate, order.Status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+type Customer struct {
+	ID          int    `json:"id"`
+	Surname     string `json:"surname"`
+	Name        string `json:"name"`
+	MiddleName  string `json:"middle_name"`
+	PhoneNumber string `json:"phone_number"`
+	Address     string `json:"address"`
+}
+
+type Order struct {
+	ID             int       `json:"id"`
+	CustomerID     int       `json:"customer_id"`
+	ReceiptID      int       `json:"receipt_id"`
+	OrderDate      time.Time `json:"order_date"`
+	ProductionDate time.Time `json:"production_date"`
+	Status         string    `json:"status"`
+}

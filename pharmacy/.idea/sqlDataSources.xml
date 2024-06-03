@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DdlMappings">
+    <mapping uuid="bd95c355-1ef8-4f6f-96f9-9e6c44b53058" name="dbstud@94.139.247.116 Mapping">
+      <data-sources db="35a2c0ed-ea8f-4f5d-9ce7-9a0f34a4e6ee" />
+      <scope>
+        <node kind="database" qname="dbstud">
+          <node kind="schema" qname="b_neltanov" />
+        </node>
+      </scope>
+    </mapping>
+  </component>
+</project>
